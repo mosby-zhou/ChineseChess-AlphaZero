@@ -18,9 +18,17 @@ _ILLEGAL_LOGIT = -1e9
 
 
 def get_device():
-    """获取计算设备"""
+    """获取计算设备（支持 CUDA、DirectML、CPU）"""
+    # 优先尝试 CUDA
     if torch.cuda.is_available():
         return torch.device('cuda')
+    # 尝试 DirectML (AMD GPU on Windows/WSL)
+    try:
+        import torch_directml
+        return torch_directml.device()
+    except ImportError:
+        pass
+    # 回退到 CPU
     return torch.device('cpu')
 
 
@@ -107,7 +115,7 @@ class ChessModel:
     处理模型的构建、保存、加载和预测。
     """
 
-    def __init__(self, num_channels=128, num_res_blocks=4, backend='gnn',
+    def __init__(self, num_channels=128, num_res_blocks=4, backend='cnn',
                  gnn_hidden_dim=64, gnn_output_dim=128):
         self.device = get_device()
         self.num_channels = num_channels
@@ -162,7 +170,7 @@ class ChessModel:
             self.gnn_output_dim = config.get('gnn_output_dim', 128)
         if self.model is None:
             self.build()
-        state_dict = torch.load(path, map_location=self.device, weights_only=True)
+        state_dict = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(state_dict)
         self.model.eval()
         return True
@@ -216,3 +224,73 @@ class ChessModel:
                 logits = logits + mask
             policy = F.softmax(logits, dim=1)
         return policy.cpu().numpy()[0], value.cpu().numpy()[0][0]
+
+    def predict_with_masks_batch(self, planes_batch, legal_indices_list):
+        """
+        批量预测走法概率（用于批量 MCTS 优化）
+
+        Args:
+            planes_batch: numpy array, shape (batch, 14, 10, 9)
+            legal_indices_list: list of list[int]，每个样本的合法走法索引
+
+        Returns:
+            policies: list of numpy array, 每个 shape (NUM_ACTIONS,)
+            values: list of float
+        """
+        batch_size = planes_batch.shape[0]
+        tensor = torch.FloatTensor(planes_batch).to(self.device)
+
+        with torch.no_grad():
+            logits, values = self.model(tensor)
+
+            # 为每个样本应用掩码
+            policies = []
+            for i in range(batch_size):
+                legal_indices = legal_indices_list[i]
+                if legal_indices:
+                    mask = torch.full_like(logits[i:i+1], _ILLEGAL_LOGIT)
+                    mask[0, legal_indices] = 0.0
+                    masked_logits = logits[i:i+1] + mask
+                else:
+                    masked_logits = logits[i:i+1]
+                policy = F.softmax(masked_logits, dim=1)
+                policies.append(policy.cpu().numpy()[0])
+
+            values_list = values.cpu().numpy().flatten().tolist()
+
+        return policies, values_list
+
+    def predict_with_masks_batch(self, planes_batch, legal_indices_list):
+        """
+        批量预测走法概率（用于批量 MCTS 优化）
+
+        Args:
+            planes_batch: numpy array, shape (batch, 14, 10, 9)
+            legal_indices_list: list of list[int]，每个样本的合法走法索引
+
+        Returns:
+            policies: list of numpy array, 每个 shape (NUM_ACTIONS,)
+            values: list of float
+        """
+        batch_size = planes_batch.shape[0]
+        tensor = torch.FloatTensor(planes_batch).to(self.device)
+
+        with torch.no_grad():
+            logits, values = self.model(tensor)
+
+            # 为每个样本应用掩码
+            policies = []
+            for i in range(batch_size):
+                legal_indices = legal_indices_list[i]
+                if legal_indices:
+                    mask = torch.full_like(logits[i:i+1], _ILLEGAL_LOGIT)
+                    mask[0, legal_indices] = 0.0
+                    masked_logits = logits[i:i+1] + mask
+                else:
+                    masked_logits = logits[i:i+1]
+                policy = F.softmax(masked_logits, dim=1)
+                policies.append(policy.cpu().numpy()[0])
+
+            values_list = values.cpu().numpy().flatten().tolist()
+
+        return policies, values_list

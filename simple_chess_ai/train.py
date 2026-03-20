@@ -36,7 +36,9 @@ from simple_chess_ai.game import (
     flip_move, flip_policy, fen_to_planes
 )
 from simple_chess_ai.model import ChessModel
-from simple_chess_ai.mcts import MCTS
+from simple_chess_ai.mcts import MCTS as StandardMCTS
+from simple_chess_ai.mcts_optimized import OptimizedMCTS
+from simple_chess_ai.mcts_fast import FastBatchMCTS
 from simple_chess_ai.export import (
     init_run_dir, append_self_play_jsonl,
     append_training_csv, append_gating_csv, plot_curves,
@@ -83,8 +85,8 @@ def evaluate_models(model_a, model_b, n_games=20, num_simulations=50, max_moves=
 
         game = ChessGame()
         game.reset()
-        mcts_red = MCTS(red_model, num_simulations=num_simulations)
-        mcts_black = MCTS(black_model, num_simulations=num_simulations)
+        mcts_red = StandardMCTS(red_model, num_simulations=num_simulations)
+        mcts_black = StandardMCTS(black_model, num_simulations=num_simulations)
 
         move_count = 0
         while not game.done and move_count < max_moves:
@@ -112,7 +114,7 @@ def evaluate_models(model_a, model_b, n_games=20, num_simulations=50, max_moves=
     return score, wins_a, wins_b, draws
 
 
-def self_play_game(model, num_simulations=100, max_moves=200, temperature_threshold=30):
+def self_play_game(model, num_simulations=100, max_moves=200, temperature_threshold=30, mcts_mode='optimized'):
     """
     执行一局自对弈
 
@@ -127,7 +129,14 @@ def self_play_game(model, num_simulations=100, max_moves=200, temperature_thresh
     """
     game = ChessGame()
     game.reset()
-    mcts = MCTS(model, num_simulations=num_simulations)
+
+    # 根据 mcts_mode 选择 MCTS 实现
+    if mcts_mode == 'batch':
+        mcts = FastBatchMCTS(model, num_simulations=num_simulations, batch_size=8)
+    elif mcts_mode == 'optimized':
+        mcts = OptimizedMCTS(model, num_simulations=num_simulations, cache_size=2000)
+    else:
+        mcts = StandardMCTS(model, num_simulations=num_simulations)
 
     states = []
     policies = []
@@ -282,7 +291,8 @@ def run_training(num_games=50, num_simulations=100, num_epochs=5,
                  buffer_size=10000, model_path=None, save_interval=10,
                  use_grpo=False, grpo_group_size=8, use_fp16=False,
                  gating_interval=20, gating_games=20, gating_winrate=0.55,
-                 seed=None, deterministic=False, runs_dir=None, quick=False):
+                 seed=None, deterministic=False, runs_dir=None, quick=False,
+                 mcts_mode='optimized', mcts_batch_size=8):
     """
     运行完整的训练流程
 
@@ -335,8 +345,8 @@ def run_training(num_games=50, num_simulations=100, num_epochs=5,
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
 
-    # 初始化模型
-    model = ChessModel(num_channels=128, num_res_blocks=4, backend='gnn')
+    # 初始化模型（使用纯 CNN 后端，DirectML 兼容性更好）
+    model = ChessModel(num_channels=128, num_res_blocks=4, backend='cnn')
     if os.path.exists(model_path):
         print(f"加载已有模型: {model_path}")
         model.load(model_path)
@@ -401,7 +411,8 @@ def run_training(num_games=50, num_simulations=100, num_epochs=5,
 
         # 自对弈
         data, winner, moves = self_play_game(
-            model, num_simulations=num_simulations, max_moves=max_moves
+            model, num_simulations=num_simulations, max_moves=max_moves,
+            mcts_mode=mcts_mode
         )
         data_buffer.extend(data)
 
@@ -414,8 +425,9 @@ def run_training(num_games=50, num_simulations=100, num_epochs=5,
             stats['draws'] += 1
 
         elapsed = time.time() - start_time
+        winner_display = {'red': '红方', 'black': '黑方', 'draw': '和棋'}.get(winner, '和棋')
         print(f"[第 {game_idx}/{num_games} 局] "
-              f"胜方: {winner or '和棋'}, "
+              f"胜方: {winner_display}, "
               f"步数: {moves}, "
               f"新增数据: {len(data)}, "
               f"缓冲区: {len(data_buffer)}, "
@@ -485,7 +497,8 @@ def run_training(num_games=50, num_simulations=100, num_epochs=5,
             print(f"  [Gating] 开始评测 (第 {game_idx} 局后)...")
             ref_model = ChessModel(
                 num_channels=model.num_channels,
-                num_res_blocks=model.num_res_blocks
+                num_res_blocks=model.num_res_blocks,
+                backend=model.backend
             )
             ref_model.build()
             ref_model.model.load_state_dict(copy.deepcopy(best_model_state))
@@ -577,6 +590,11 @@ def main():
                         help='开启 cuDNN 确定性模式（配合 --seed 使用，可能降低训练速度）')
     parser.add_argument('--runs_dir', type=str, default=None,
                         help=f'数据与日志导出根目录 (默认: simple_chess_ai/runs/)')
+    parser.add_argument('--mcts_mode', type=str, default='optimized',
+                        choices=['standard', 'optimized', 'batch'],
+                        help='MCTS模式: standard(原始), optimized(缓存优化), batch(批量推理最快) (默认: optimized)')
+    parser.add_argument('--mcts_batch_size', type=int, default=8,
+                        help='批量MCTS的批大小，仅mcts_mode=batch时生效 (默认: 8)')
     parser.add_argument('--quick', action='store_true',
                         help='快速模式：1局自对弈+1次参数更新，用于验证流程')
 

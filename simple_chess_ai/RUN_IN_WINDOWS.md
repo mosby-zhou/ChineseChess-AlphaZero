@@ -160,6 +160,7 @@ python -m simple_chess_ai train --num_games 100 --mcts_mode batch
 | `--num_simulations` | 100 | 每步 MCTS 模拟次数 |
 | `--batch_size` | 256 | 训练批次大小 |
 | `--mcts_mode` | standard | MCTS 模式：standard/optimized/batch |
+| `--backend` | cnn | 网络架构：cnn（速度快）/ gnn（理论上限高）|
 | `--use_fp16` | False | 启用 FP16 加速（仅 NVIDIA GPU） |
 | `--use_grpo` | False | 启用 GRPO 训练方法 |
 
@@ -296,8 +297,11 @@ python -c "from simple_chess_ai.model import get_device; print(get_device())"
 # 3. 快速测试
 python -m simple_chess_ai train --quick
 
-# 4. 正式训练
-python -m simple_chess_ai train --num_games 100 --num_simulations 100 --mcts_mode batch
+# 4. 正式训练（NVIDIA GPU）
+python -m simple_chess_ai train --num_games 100 --num_simulations 100 --mcts_mode batch --use_fp16 --backend cnn
+
+# 4b. 正式训练（AMD GPU - 仅支持 CNN）
+python -m simple_chess_ai train --num_games 100 --num_simulations 100 --mcts_mode batch --backend cnn
 
 # 5. 对弈
 python -m simple_chess_ai play

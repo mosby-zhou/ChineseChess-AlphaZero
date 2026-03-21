@@ -292,7 +292,7 @@ def run_training(num_games=50, num_simulations=100, num_epochs=5,
                  use_grpo=False, grpo_group_size=8, use_fp16=False,
                  gating_interval=20, gating_games=20, gating_winrate=0.55,
                  seed=None, deterministic=False, runs_dir=None, quick=False,
-                 mcts_mode='optimized', mcts_batch_size=8):
+                 mcts_mode='optimized', mcts_batch_size=8, backend='cnn'):
     """
     运行完整的训练流程
 
@@ -345,8 +345,8 @@ def run_training(num_games=50, num_simulations=100, num_epochs=5,
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
 
-    # 初始化模型（使用纯 CNN 后端，DirectML 兼容性更好）
-    model = ChessModel(num_channels=128, num_res_blocks=4, backend='cnn')
+    # 初始化模型
+    model = ChessModel(num_channels=128, num_res_blocks=4, backend=backend)
     if os.path.exists(model_path):
         print(f"加载已有模型: {model_path}")
         model.load(model_path)
@@ -595,6 +595,9 @@ def main():
                         help='MCTS模式: standard(原始), optimized(缓存优化), batch(批量推理最快) (默认: optimized)')
     parser.add_argument('--mcts_batch_size', type=int, default=8,
                         help='批量MCTS的批大小，仅mcts_mode=batch时生效 (默认: 8)')
+    parser.add_argument('--backend', type=str, default='cnn',
+                        choices=['cnn', 'gnn'],
+                        help='网络架构: cnn(卷积网络,速度快) 或 gnn(图网络,理论上限高) (默认: cnn)')
     parser.add_argument('--quick', action='store_true',
                         help='快速模式：1局自对弈+1次参数更新，用于验证流程')
 

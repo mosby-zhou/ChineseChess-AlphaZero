@@ -246,9 +246,9 @@ class GRPOTrainer:
         with torch.amp.autocast('cuda', enabled=amp_enabled):
             policy_logits, value = self.model.model(states)
 
-            # 掩码非法走法
+            # 掩码非法走法（FP16 安全范围）
             masked_logits = policy_logits.clone()
-            masked_logits[legal_masks == 0] = -1e9
+            masked_logits[legal_masks == 0] = -1e4  # FP16 安全，避免 nan
             log_probs = F.log_softmax(masked_logits, dim=-1)
 
             # 价值损失：z_values为真实回报

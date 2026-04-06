@@ -9,6 +9,7 @@
 """
 
 import math
+import time
 import numpy as np
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass, field
@@ -78,6 +79,7 @@ class FastBatchMCTS:
     2. 预计算 PUCT 常量：减少重复计算
     3. 批量选择：并行收集叶子节点
     4. 缓存友好：减少内存分配
+    5. 支持跨局批量推理（multi-game batching）
     """
 
     def __init__(self, model, num_simulations: int = 200, batch_size: int = 16,
@@ -95,9 +97,14 @@ class FastBatchMCTS:
         # 预计算常量
         self._sqrt_cache = {}
 
+        # GPU 计时统计
+        self._gpu_time = 0.0
+        self._total_time = 0.0
+
     def get_action_probs(self, game: ChessGame, temperature: float = 1.0,
                          add_noise: bool = False, reset_root: bool = True) -> Tuple[List[str], List[float]]:
         """运行 MCTS 搜索"""
+        t0 = time.time()
         if reset_root:
             self.root = FastMCTSNode()
 
@@ -108,7 +115,9 @@ class FastBatchMCTS:
         # 首次扩展根节点
         if not self.root.children:
             planes = game.to_planes()
+            t_gpu0 = time.time()
             policy, value = self.model.predict_with_mask(planes, root_legal_indices)
+            self._gpu_time += time.time() - t_gpu0
             self._expand_node(self.root, root_legal_moves, policy)
 
             if add_noise:
@@ -127,16 +136,20 @@ class FastBatchMCTS:
 
             # 批量推理
             planes_batch = np.array([leaf.planes for leaf in leaves])
+            t_gpu0 = time.time()
             policies, values = self.model.predict_with_masks_batch(
                 planes_batch,
                 [leaf.legal_indices for leaf in leaves]
             )
+            self._gpu_time += time.time() - t_gpu0
 
             # 扩展并回传
             for leaf, policy, value in zip(leaves, policies, values):
                 self._expand_and_backprop(leaf, policy, -value)
 
             remaining -= len(leaves)
+
+        self._total_time += time.time() - t0
 
         # 提取走法概率
         actions = list(self.root.children.keys())
@@ -280,3 +293,71 @@ class FastBatchMCTS:
             self.root = self.root.children[action]
         else:
             self.root = FastMCTSNode()
+
+    @property
+    def gpu_time(self) -> float:
+        """累计 GPU 推理时间"""
+        return self._gpu_time
+
+    @property
+    def total_time(self) -> float:
+        """累计总时间"""
+        return self._total_time
+
+    def reset_timing(self):
+        """重置计时统计"""
+        self._gpu_time = 0.0
+        self._total_time = 0.0
+
+    # ── 跨局批量推理接口（供 multi_game_self_play 使用）──────────────────
+
+    def prepare_root(self, game: ChessGame, add_noise: bool = False):
+        """扩展根节点（如尚未扩展），返回 (policy, value) 或 None"""
+        if self.root.children:
+            return None
+        legal_moves = game.get_legal_moves()
+        legal_moves_flipped = legal_moves if game.red_to_move else [flip_move(m) for m in legal_moves]
+        legal_indices = [LABEL_TO_INDEX[m] for m in legal_moves_flipped if m in LABEL_TO_INDEX]
+        planes = game.to_planes()
+        return planes, legal_indices, legal_moves_flipped, add_noise
+
+    def apply_root_expansion(self, legal_moves, policy, value, add_noise=False):
+        """应用根节点扩展结果"""
+        self._expand_node(self.root, legal_moves, policy)
+        if add_noise:
+            self._add_dirichlet_noise(self.root)
+        self.root.add_visit(value)
+
+    def collect_batch(self, game: ChessGame, batch_size: int) -> List[LeafInfo]:
+        """收集一批叶子节点（公开接口，不做推理）"""
+        return self._collect_leaves_batch(game, batch_size)
+
+    def apply_batch_results(self, leaves, policies, values):
+        """应用批量推理结果"""
+        for leaf, policy, value in zip(leaves, policies, values):
+            self._expand_and_backprop(leaf, policy, -value)
+
+    @property
+    def simulations_done(self) -> int:
+        """已完成的模拟次数"""
+        return self.root.visit_count
+
+    def extract_action_probs(self, temperature: float = 1.0) -> Tuple[List[str], List[float]]:
+        """从树中提取走法概率（不做搜索）"""
+        actions = list(self.root.children.keys())
+        visits = [self.root.children[a].visit_count for a in actions]
+
+        if not actions:
+            return [], []
+
+        if temperature < 1e-8:
+            best_idx = np.argmax(visits)
+            probs = [0.0] * len(actions)
+            probs[best_idx] = 1.0
+        else:
+            visits_arr = np.array(visits, dtype=np.float64)
+            visits_temp = visits_arr ** (1.0 / temperature)
+            total = visits_temp.sum()
+            probs = (visits_temp / total).tolist() if total > 0 else [1.0 / len(actions)] * len(actions)
+
+        return actions, probs

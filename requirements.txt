@@ -1,17 +1,20 @@
-# 深度学习框架 - PyTorch
+# deep learning framework - PyTorch
 torch>=1.9.0
 torchvision>=0.10.0
 
-# 数据处理
+# data processing libraries
 numpy
 pandas
 h5py
 
-# 游戏界面
+# game interface library
 pygame
 
-# 网络请求
+# network requests
 requests
 
-# 进度条
+# progress bar library
 tqdm
+
+# matplotlib library
+matplotlib

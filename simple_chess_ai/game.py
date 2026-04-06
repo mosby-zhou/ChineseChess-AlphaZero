@@ -233,8 +233,22 @@ class ChessGame:
         return piece.isupper()
 
     def copy(self):
-        """深拷贝当前游戏状态"""
-        return copy.deepcopy(self)
+        """高效拷贝当前游戏状态（避免 deepcopy 开销）"""
+        new = ChessGame.__new__(ChessGame)
+        # 浅拷贝棋盘行列表（每行是独立的 list，需复制内容）
+        new.board = [row[:] for row in self.board]
+        new.red_to_move = self.red_to_move
+        new.winner = self.winner
+        new.num_moves = self.num_moves
+        new.pos_hash = self.pos_hash
+        # 浅拷贝历史列表（历史元素为不可变类型，无需深拷贝）
+        new.pos_history = self.pos_history[:]
+        new.move_history = self.move_history[:]
+        new.check_history = self.check_history[:]
+        # frozenset 元素不可变，浅拷贝即可
+        new.chase_history = self.chase_history[:]
+        new.terminate_reason = self.terminate_reason
+        return new
 
     def get_legal_moves(self, side=None):
         """

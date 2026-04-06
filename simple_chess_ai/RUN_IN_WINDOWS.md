@@ -64,8 +64,8 @@ where python
 ### 2.2 NVIDIA GPU（CUDA）
 
 ```powershell
-# 安装 PyTorch (CUDA 11.8 版本)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# 安装 PyTorch (CUDA 13.0 版本)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 
 # 安装其他依赖
 pip install numpy pygame tqdm pandas h5py requests

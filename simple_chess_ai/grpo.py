@@ -56,7 +56,39 @@ class GRPOTrainer:
             model.model.parameters(), lr=lr, weight_decay=1e-4
         )
         amp_available = use_fp16 and model.device.type == 'cuda'
-        self.scaler = torch.amp.GradScaler('cuda') if amp_available else None
+        # 使用较小的初始缩放因子，避免 FP16 溢出
+        self.scaler = (
+            torch.amp.GradScaler('cuda', init_scale=1024.0)
+            if amp_available else None
+        )
+        # 权重快照：用于 NaN 恢复
+        self._weight_snapshot = None
+        self._nan_count = 0
+
+    def _save_weight_snapshot(self):
+        """保存模型权重快照（用于 NaN 恢复）"""
+        self._weight_snapshot = {
+            k: v.clone().detach().cpu()
+            for k, v in self.model.model.state_dict().items()
+        }
+
+    def _recover_from_nan(self):
+        """从 NaN 恢复：加载最后一次正常权重快照"""
+        self._nan_count += 1
+        if self._weight_snapshot is not None:
+            print(f"  [NaN恢复] 检测到NaN/Inf，恢复到上次正常权重 (第{self._nan_count}次)")
+            self.model.model.load_state_dict(self._weight_snapshot)
+            self.model.model.to(self.model.device)
+            # 降低学习率以避免再次爆炸
+            for param_group in self.optimizer.param_groups:
+                old_lr = param_group['lr']
+                param_group['lr'] = max(old_lr * 0.5, 1e-6)
+                print(f"  [NaN恢复] 学习率: {old_lr:.2e} → {param_group['lr']:.2e}")
+            # 重置 GradScaler
+            if self.scaler is not None:
+                self.scaler.update()
+        else:
+            print(f"  [NaN恢复] 无权重快照，跳过恢复 (第{self._nan_count}次)")
 
     def group_sample(self, policy_logits, legal_mask, group_size=None):
         """
@@ -74,9 +106,9 @@ class GRPOTrainer:
         if group_size is None:
             group_size = self.group_size
 
-        # 将非法动作的 logit 设为极小值
+        # 将非法动作的 logit 设为极小值（FP16 安全值）
         masked_logits = policy_logits.clone()
-        masked_logits[legal_mask == 0] = -1e9
+        masked_logits[legal_mask == 0] = -1e4
 
         # 计算概率分布
         probs = F.softmax(masked_logits, dim=-1)
@@ -150,14 +182,16 @@ class GRPOTrainer:
 
         # 转换为 tensor
         if isinstance(states, np.ndarray):
-            states = torch.FloatTensor(states).to(self.model.device)
+            states = torch.as_tensor(states, dtype=torch.float32).to(
+                self.model.device, non_blocking=True)
         if isinstance(legal_masks, np.ndarray):
-            legal_masks = torch.FloatTensor(legal_masks).to(self.model.device)
+            legal_masks = torch.as_tensor(legal_masks, dtype=torch.float32).to(
+                self.model.device, non_blocking=True)
 
         amp_enabled = self.use_fp16 and states.device.type == 'cuda'
 
         with torch.amp.autocast('cuda', enabled=amp_enabled):
-            # 1. 获取当前策略 logits（forward() 已返回 logits，无需再取 log）
+            # 1. 获取当前策略 logits
             policy_logits, value = self.model.model(states)
 
             # 2. 组采样
@@ -194,14 +228,27 @@ class GRPOTrainer:
 
             total_loss = policy_loss + self.kl_coeff * kl_div
 
+            # NaN 保护：检测异常损失，跳过该步
+            if torch.isnan(total_loss) or torch.isinf(total_loss):
+                self.model.model.eval()
+                return {
+                    'loss': 0.0,
+                    'policy_loss': 0.0,
+                    'kl_loss': 0.0,
+                }
+
         # 反向传播
         self.optimizer.zero_grad()
         if self.scaler is not None:
             self.scaler.scale(total_loss).backward()
+            # 梯度裁剪（在 unscale 之后才能正确裁剪）
+            self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.model.parameters(), max_norm=1.0)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
             total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
         self.model.model.eval()
@@ -231,15 +278,20 @@ class GRPOTrainer:
         self.model.model.train()
 
         if isinstance(states, np.ndarray):
-            states = torch.FloatTensor(states).to(self.model.device)
+            states = torch.as_tensor(states, dtype=torch.float32).to(
+                self.model.device, non_blocking=True)
         if isinstance(legal_masks, np.ndarray):
-            legal_masks = torch.FloatTensor(legal_masks).to(self.model.device)
+            legal_masks = torch.as_tensor(legal_masks, dtype=torch.float32).to(
+                self.model.device, non_blocking=True)
         if isinstance(actions, np.ndarray):
-            actions = torch.LongTensor(actions).to(self.model.device)
+            actions = torch.as_tensor(actions, dtype=torch.long).to(
+                self.model.device, non_blocking=True)
         if isinstance(pi_mcts, np.ndarray):
-            pi_mcts = torch.FloatTensor(pi_mcts).to(self.model.device)
+            pi_mcts = torch.as_tensor(pi_mcts, dtype=torch.float32).to(
+                self.model.device, non_blocking=True)
         if isinstance(z_values, np.ndarray):
-            z_values = torch.FloatTensor(z_values).to(self.model.device)
+            z_values = torch.as_tensor(z_values, dtype=torch.float32).to(
+                self.model.device, non_blocking=True)
 
         amp_enabled = self.use_fp16 and states.device.type == 'cuda'
 
@@ -256,7 +308,7 @@ class GRPOTrainer:
 
             # 策略损失：用z作为优势信号
             baseline = value.squeeze(-1).detach()
-            advantage = z_values - baseline
+            advantage = (z_values - baseline).clamp(-2.0, 2.0)
 
             # 当前动作的log概率
             action_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
@@ -282,13 +334,32 @@ class GRPOTrainer:
 
             total_loss = policy_loss + pi_loss + value_loss + self.kl_coeff * kl_div
 
+            # NaN 保护：检测异常损失，恢复权重并跳过该步
+            if torch.isnan(total_loss) or torch.isinf(total_loss):
+                self._recover_from_nan()
+                self.model.model.eval()
+                return {
+                    'loss': float('nan'),
+                    'policy_loss': float('nan'),
+                    'pi_loss': float('nan'),
+                    'value_loss': float('nan'),
+                    'kl_loss': float('nan'),
+                }
+
+        # 成功计算损失 → 保存权重快照（用于后续 NaN 恢复）
+        self._save_weight_snapshot()
+
         self.optimizer.zero_grad()
         if self.scaler is not None:
             self.scaler.scale(total_loss).backward()
+            # 梯度裁剪（在 unscale 之后才能正确裁剪）
+            self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.model.parameters(), max_norm=1.0)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
             total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
         self.model.model.eval()

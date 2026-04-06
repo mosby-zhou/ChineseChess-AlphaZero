@@ -10,13 +10,14 @@
 
 ### 1.1 技术栈
 
-| 维度 | 旧项目 (cchess_alphazero) | 新项目 (simple_chess_ai) |
-|------|---------------------------|--------------------------|
-| 深度学习框架 | TensorFlow 1.3 + Keras 2.0.8 | PyTorch（最新版） |
-| 语言版本 | Python 3.6.3 | Python 3.8+ |
-| GPU 支持 | CUDA（旧版） | CUDA + DirectML（AMD） |
+| 维度         | 旧项目 (cchess_alphazero)    | 新项目 (simple_chess_ai) |
+| ------------ | ---------------------------- | ------------------------ |
+| 深度学习框架 | TensorFlow 1.3 + Keras 2.0.8 | PyTorch（最新版）        |
+| 语言版本     | Python 3.6.3                 | Python 3.8+              |
+| GPU 支持     | CUDA（旧版）                 | CUDA + DirectML（AMD）   |
 
 **评估**：新项目采用 PyTorch，具备以下优势：
+
 - 更灵活的动态计算图，便于实验和调试
 - 更好的社区支持和生态
 - DirectML 支持 AMD GPU
@@ -24,12 +25,12 @@
 
 ### 1.2 网络架构
 
-| 维度 | 旧项目 | 新项目 |
-|------|--------|--------|
-| 网络类型 | 纯 CNN（ResNet） | CNN（默认）/ GNN（可选）|
-| 通道数 | 256 | 128 |
-| 残差块数量 | 7 | 4 |
-| 参数量 | ~5M | ~2M |
+| 维度       | 旧项目           | 新项目                   |
+| ---------- | ---------------- | ------------------------ |
+| 网络类型   | 纯 CNN（ResNet） | CNN（默认）/ GNN（可选） |
+| 通道数     | 256              | 128                      |
+| 残差块数量 | 7                | 4                        |
+| 参数量     | ~5M              | ~2M                      |
 
 **注意**：GNN 后端在 DirectML 上兼容性不佳，推荐使用 CNN 后端。
 
@@ -37,28 +38,30 @@
 
 ## 二、业界趋势符合度
 
-| 趋势 | 旧项目 | 新项目 |
-|------|--------|--------|
-| **图神经网络（GNN）** | ❌ | ✅（可选）|
-| **混合精度训练（FP16）** | ❌ | ✅（仅 CUDA）|
-| **GRPO / 强化学习新方法** | ❌ | ✅ |
-| **分布式训练** | ✅ | ❌ |
-| **模型轻量化** | ❌ | ✅ |
+| 趋势                      | 旧项目 | 新项目        |
+| ------------------------- | ------ | ------------- |
+| **图神经网络（GNN）**     | ❌     | ✅（可选）    |
+| **混合精度训练（FP16）**  | ❌     | ✅（仅 CUDA） |
+| **GRPO / 强化学习新方法** | ❌     | ✅            |
+| **分布式训练**            | ✅     | ❌            |
+| **模型轻量化**            | ❌     | ✅            |
 
 ---
 
 ## 三、总结
 
 **新项目能否对齐旧项目？**
+
 - 核心能力：✅ 可以对齐（规则、网络、训练流程）
 - 训练规模：❌ 暂时无法对齐（缺少分布式）
 
 **是否符合业界最新趋势？**
+
 - ✅ 完全符合，且部分领先（GNN + GRPO）
 
 ---
 
-*报告生成时间：2026-03-18*
+_报告生成时间：2026-03-18_
 
 ---
 
@@ -68,12 +71,12 @@
 
 ### 1.1 系统要求
 
-| 配置项 | 最低要求 | 推荐配置 |
-|--------|----------|----------|
-| Python | 3.8+ | 3.10+ |
-| 内存 | 4GB | 8GB+ |
-| 存储 | 500MB | 2GB |
-| GPU | 无（可用 CPU）| AMD/NVIDIA |
+| 配置项 | 最低要求       | 推荐配置   |
+| ------ | -------------- | ---------- |
+| Python | 3.8+           | 3.10+      |
+| 内存   | 4GB            | 8GB+       |
+| 存储   | 500MB          | 2GB        |
+| GPU    | 无（可用 CPU） | AMD/NVIDIA |
 
 ### 1.2 创建虚拟环境
 
@@ -91,16 +94,19 @@ source venv/bin/activate
 ### 1.3 安装依赖
 
 **AMD GPU（DirectML）**：
+
 ```bash
 pip install torch-directml numpy pygame matplotlib
 ```
 
 **NVIDIA GPU（CUDA）**：
+
 ```bash
-pip install torch numpy pygame matplotlib --index-url https://download.pytorch.org/whl/cu121
+pip install torch numpy pygame matplotlib --index-url https://download.pytorch.org/whl/cu130
 ```
 
 **纯 CPU**：
+
 ```bash
 pip install torch numpy pygame matplotlib --index-url https://download.pytorch.org/whl/cpu
 ```
@@ -117,6 +123,7 @@ print(f'数量: {dml.device_count()}')
 ```
 
 预期输出：
+
 ```
 GPU: AMD Radeon Pro 5300M
 数量: 1
@@ -133,6 +140,7 @@ python -m simple_chess_ai train --quick
 ```
 
 预期输出：
+
 ```
 创建新模型
 开始训练 (Standard)
@@ -170,6 +178,7 @@ python -m simple_chess_ai play
 ```
 
 **走法格式**：`x0 y0 x1 y1`
+
 - 例如 `4 0 4 1` 表示帅从 (4,0) 向前走一步
 
 ---
@@ -182,24 +191,24 @@ python -m simple_chess_ai play
 python -m simple_chess_ai train [选项]
 ```
 
-| 选项 | 默认值 | 说明 |
-|------|--------|------|
-| `--num_games` | 50 | 自对弈局数 |
-| `--num_simulations` | 100 | 每步 MCTS 模拟次数 |
-| `--num_epochs` | 5 | 每次训练轮数 |
-| `--batch_size` | 256 | 训练批大小 |
-| `--lr` | 0.001 | 学习率 |
-| `--max_moves` | 200 | 每局最大步数 |
-| `--buffer_size` | 10000 | 数据缓冲区大小 |
-| `--model_path` | saved_model/model.pth | 模型保存路径 |
-| `--save_interval` | 10 | 每隔多少局保存模型 |
-| `--use_grpo` | False | 使用 GRPO 训练 |
-| `--grpo_group_size` | 8 | GRPO 组大小 |
-| `--gating_interval` | 20 | Gating 评测间隔（0=禁用）|
-| `--gating_games` | 20 | Gating 对局数 |
-| `--gating_winrate` | 0.55 | Gating 接受阈值 |
-| `--seed` | None | 随机种子 |
-| `--quick` | False | 快速验证模式 |
+| 选项                | 默认值                | 说明                      |
+| ------------------- | --------------------- | ------------------------- |
+| `--num_games`       | 50                    | 自对弈局数                |
+| `--num_simulations` | 100                   | 每步 MCTS 模拟次数        |
+| `--num_epochs`      | 5                     | 每次训练轮数              |
+| `--batch_size`      | 256                   | 训练批大小                |
+| `--lr`              | 0.001                 | 学习率                    |
+| `--max_moves`       | 200                   | 每局最大步数              |
+| `--buffer_size`     | 10000                 | 数据缓冲区大小            |
+| `--model_path`      | saved_model/model.pth | 模型保存路径              |
+| `--save_interval`   | 10                    | 每隔多少局保存模型        |
+| `--use_grpo`        | False                 | 使用 GRPO 训练            |
+| `--grpo_group_size` | 8                     | GRPO 组大小               |
+| `--gating_interval` | 20                    | Gating 评测间隔（0=禁用） |
+| `--gating_games`    | 20                    | Gating 对局数             |
+| `--gating_winrate`  | 0.55                  | Gating 接受阈值           |
+| `--seed`            | None                  | 随机种子                  |
+| `--quick`           | False                 | 快速验证模式              |
 
 ### 3.2 对弈命令
 
@@ -217,12 +226,12 @@ python -m simple_chess_ai play [--num_simulations 200]
 
 ### 4.1 已验证环境
 
-| 项目 | 配置 |
-|------|------|
-| 系统 | WSL2 + Ubuntu 24.04 |
-| GPU | AMD Radeon Pro 5300M |
+| 项目    | 配置                 |
+| ------- | -------------------- |
+| 系统    | WSL2 + Ubuntu 24.04  |
+| GPU     | AMD Radeon Pro 5300M |
 | PyTorch | torch-directml 0.2.5 |
-| 后端 | CNN（纯卷积）|
+| 后端    | CNN（纯卷积）        |
 
 ### 4.2 注意事项
 
@@ -269,6 +278,7 @@ simple_chess_ai/
 ### Q1: 训练报错 "Weights only load failed"
 
 **A**: 已修复。如果仍遇到，删除旧模型重新训练：
+
 ```bash
 rm -rf simple_chess_ai/saved_model/*
 python -m simple_chess_ai train --quick
@@ -281,11 +291,13 @@ python -m simple_chess_ai train --quick
 ### Q3: GPU 识别为 CPU
 
 **A**: 检查 DirectML 安装：
+
 ```bash
 python -c "import torch_directml; print(torch_directml.device_name(0))"
 ```
 
 如果报错，重新安装：
+
 ```bash
 pip install --force-reinstall torch-directml
 ```
@@ -318,6 +330,64 @@ pip install --force-reinstall torch-directml
 ```bash
 # NVIDIA GPU 推荐用法
 python -m simple_chess_ai train --use_fp16
+python -m simple_chess_ai train \
+    --num_games 100 \
+    --num_simulations 100 \
+    --batch_size 256 \
+    --gating_interval 20
+```
+
+### NVIDIA GPU（可用 FP16 加速）
+
+● 两个命令的区别：
+
+┌───────────────────┬─────────────────┬────────────┬────────────────────┐  
+ │ 参数 │ 命令1 │ 命令2 │ 影响 │
+├───────────────────┼─────────────────┼────────────┼────────────────────┤  
+ │ --num_games │ 100 │ 200 │ 训练局数 │  
+ ├───────────────────┼─────────────────┼────────────┼────────────────────┤  
+ │ --num_simulations │ 200 │ 50 │ 每步 MCTS 模拟次数 │  
+ ├───────────────────┼─────────────────┼────────────┼────────────────────┤  
+ │ --batch_size │ 512 │ 256 (默认) │ 训练批次大小 │  
+ ├───────────────────┼─────────────────┼────────────┼────────────────────┤  
+ │ --mcts_mode │ standard (默认) │ batch │ MCTS 实现方式 │
+├───────────────────┼─────────────────┼────────────┼────────────────────┤  
+ │ --gating_interval │ 20 │ 50 (默认) │ 模型评估频率 │
+└───────────────────┴─────────────────┴────────────┴────────────────────┘
+
+核心差异：
+
+┌──────────┬────────────────────────┬────────────────────┐  
+ │ │ 命令1 (高质量) │ 命令2 (高效率) │
+├──────────┼────────────────────────┼────────────────────┤  
+ │ 特点 │ 每步思考深 (200次模拟) │ 批量推理加速 │
+├──────────┼────────────────────────┼────────────────────┤  
+ │ 棋力 │ 更强（搜索更充分） │ 稍弱（搜索少但快） │  
+ ├──────────┼────────────────────────┼────────────────────┤  
+ │ 速度 │ 每局较慢 │ 每局较快 (~1.8x) │  
+ ├──────────┼────────────────────────┼────────────────────┤  
+ │ 内存 │ 较高 (batch_size=512) │ 较低 │
+├──────────┼────────────────────────┼────────────────────┤  
+ │ 适用场景 │ 追求高质量训练 │ 快速迭代实验 │
+└──────────┴────────────────────────┴────────────────────┘
+
+建议：
+
+- 追求棋力：命令1（高模拟次数）
+- 快速迭代：命令2（batch 模式 + 低模拟次数）
+- 最佳组合：--mcts_mode batch --num_simulations 200（兼顾速度和质量）
+
+```bash
+python -m simple_chess_ai train \
+    --num_games 100 \
+    --num_simulations 200 \
+    --batch_size 512 \
+    --use_fp16 \
+    --gating_interval 20
+```
+
+```bash
+python -m simple_chess_ai train --num_games 200 --mcts_mode batch --num_simulations 50 --use_fp16
 ```
 
 ---
@@ -523,31 +593,31 @@ python -m simple_chess_ai train --num_simulations 400
 
 ```bash
 # 高质量训练（推荐）
-python -m simple_chess_ai train \
-    --num_games 200 \
-    --num_simulations 200 \
-    --batch_size 512 \
-    --use_fp16 \
-    --mcts_mode batch \
-    --backend cnn \
+python -m simple_chess_ai train `
+    --num_games 200 `
+    --num_simulations 200 `
+    --batch_size 512 `
+    --use_fp16 `
+    --mcts_mode batch `
+    --backend cnn `
     --gating_interval 20
 
 # 快速迭代实验
-python -m simple_chess_ai train \
-    --num_games 100 \
-    --num_simulations 100 \
-    --batch_size 512 \
-    --use_fp16 \
-    --mcts_mode batch \
-    --backend cnn \
+python -m simple_chess_ai train `
+    --num_games 100 `
+    --num_simulations 100 `
+    --batch_size 2048 `
+    --use_fp16 `
+    --mcts_mode batch `
+    --backend cnn `
     --use_grpo
 
 # GNN 实验性训练（理论上限高，速度较慢）
-python -m simple_chess_ai train \
-    --num_games 100 \
-    --num_simulations 100 \
-    --batch_size 256 \
-    --use_fp16 \
+python -m simple_chess_ai train `
+    --num_games 100 `
+    --num_simulations 100 `
+    --batch_size 256 `
+    --use_fp16 `
     --backend gnn
 ```
 

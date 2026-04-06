@@ -102,19 +102,35 @@ pip install torch-directml numpy pygame matplotlib
 **NVIDIA GPU（CUDA）**：
 
 ```bash
-pip install torch numpy pygame matplotlib --index-url https://download.pytorch.org/whl/cu130
+# RTX 50 系列（Blackwell 架构，如 RTX 5070 Ti）需要 PyTorch >= 2.11 + CUDA 13.0
+pip install torch==2.11.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+
+# RTX 40 系列及更早（Ada Lovelace / Ampere 等）
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```
+
+> **注意**：RTX 5070 Ti (sm_120) 使用旧版 PyTorch 会导致 CUDA 不兼容警告和性能严重下降。
+> 如果看到 `sm_120 is not compatible` 警告，请升级到 PyTorch 2.11+cu130。
 
 **纯 CPU**：
 
 ```bash
-pip install torch numpy pygame matplotlib --index-url https://download.pytorch.org/whl/cpu
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ### 1.4 验证安装
 
 ```bash
-# 验证 GPU 是否可用
+# NVIDIA GPU 验证
+python -c "
+import torch
+print(f'PyTorch: {torch.__version__}')
+print(f'CUDA: {torch.version.cuda}')
+print(f'GPU: {torch.cuda.get_device_name(0)}')
+print(f'GPU available: {torch.cuda.is_available()}')
+"
+
+# AMD GPU 验证
 python -c "
 import torch_directml as dml
 print(f'GPU: {dml.device_name(0)}')
@@ -122,11 +138,13 @@ print(f'数量: {dml.device_count()}')
 "
 ```
 
-预期输出：
+预期输出（NVIDIA）：
 
 ```
-GPU: AMD Radeon Pro 5300M
-数量: 1
+PyTorch: 2.11.0+cu130
+CUDA: 13.0
+GPU: NVIDIA GeForce RTX 5070 Ti
+GPU available: True
 ```
 
 ---
@@ -518,15 +536,15 @@ python -m simple_chess_ai train --backend gnn
 | **默认值** | 100 |
 | **影响** | 模拟次数越多，搜索越充分，棋力越强，但速度越慢 |
 
-**推荐配置**：
+**推荐配置**（RTX 5070 Ti + batch 模式实测）：
 
-| 目标 | 模拟次数 | 单局耗时（参考）|
-|------|----------|-----------------|
-| 快速验证 | 10-20 | 5-10秒 |
-| 快速迭代 | 50 | 15-30秒 |
-| 标准训练 | 100 | 30-60秒 |
-| 高质量训练 | 200-400 | 1-3分钟 |
-| 比赛级 | 800+ | 5分钟+ |
+| 目标 | 模拟次数 | max_moves | 单局耗时 | 说明 |
+|------|----------|-----------|----------|------|
+| 快速验证 | 20 | 50 | ~1s | 验证环境是否正常 |
+| 快速迭代 | 50 | 100 | ~2-5s | 推荐起步配置 |
+| 标准训练 | 100 | 100 | ~5-10s | 质量与速度平衡 |
+| 高质量训练 | 200 | 200 | ~15-20s | 需切换 optimized 模式 |
+| 比赛级 | 400+ | 200 | ~1分钟+ | 需 optimized 模式 |
 
 ```bash
 # 快速验证
@@ -589,48 +607,84 @@ python -m simple_chess_ai train --num_simulations 400
 
 ### 8.1 NVIDIA GPU（Windows + CUDA + RTX 5070Ti）
 
+**实测环境**：i7-13700K + RTX 5070 Ti (16GB) + Windows 11 + Python 3.13 + PyTorch 2.11.0+cu130
+
+> **重要**：RTX 5070 Ti 属于 Blackwell 架构 (sm_120)，需要 PyTorch >= 2.11 + CUDA 13.0。
+> 旧版 PyTorch (如 2.6.0+cu118) 不兼容，会导致 CUDA 内核错误或严重变慢。
+>
+> ```bash
+> pip install torch==2.11.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+> ```
+
 **推荐命令**：
 
 ```bash
-# 高质量训练（推荐）
-python -m simple_chess_ai train `
-    --num_games 200 `
-    --num_simulations 200 `
-    --batch_size 512 `
-    --use_fp16 `
-    --mcts_mode batch `
-    --backend cnn `
-    --gating_interval 20
+# 快速训练（推荐，实测 ~2s/局，5000局约 3 小时）
+python -m simple_chess_ai.train ^
+    --num_games 5000 ^
+    --num_simulations 50 ^
+    --max_moves 100 ^
+    --batch_size 64 ^
+    --use_grpo --use_fp16 ^
+    --mcts_mode batch ^
+    --mcts_batch_size 32 ^
+    --num_workers 4 ^
+    --save_interval 100 ^
+    --gating_interval 200 ^
+    --gating_games 10 ^
+    --gating_winrate 0.55
 
-# 快速迭代实验
-python -m simple_chess_ai train `
-    --num_games 100 `
-    --num_simulations 100 `
-    --batch_size 2048 `
-    --use_fp16 `
-    --mcts_mode batch `
-    --backend cnn `
-    --use_grpo
+# 高质量训练（棋力更强，实测 ~15s/局，5000局约 20 小时）
+python -m simple_chess_ai.train ^
+    --num_games 5000 ^
+    --num_simulations 200 ^
+    --max_moves 200 ^
+    --batch_size 256 ^
+    --use_grpo --use_fp16 ^
+    --mcts_mode optimized ^
+    --num_workers 4 ^
+    --save_interval 100 ^
+    --gating_interval 200 ^
+    --gating_games 10 ^
+    --gating_winrate 0.55
 
-# GNN 实验性训练（理论上限高，速度较慢）
-python -m simple_chess_ai train `
-    --num_games 100 `
-    --num_simulations 100 `
-    --batch_size 256 `
-    --use_fp16 `
-    --backend gnn
+# 快速验证（10局，约 30 秒）
+python -m simple_chess_ai.train ^
+    --num_games 10 ^
+    --num_simulations 20 ^
+    --max_moves 50 ^
+    --mcts_mode batch ^
+    --use_grpo --use_fp16
 ```
 
 **配置说明**：
 
-| 参数 | 推荐值 | 原因 |
-|------|--------|------|
-| `--use_fp16` | ✅ 开启 | RTX 5070Ti 支持 FP16，加速 ~2x |
-| `--batch_size` | 512 | 16GB 显存充足 |
-| `--mcts_mode` | batch | NVIDIA GPU 推理快，批量效率高 |
-| `--backend` | cnn | CNN 速度快，GNN 可实验性尝试 |
-| `--num_simulations` | 200 | 平衡质量与速度 |
-| `--use_grpo` | 可选 | 快速收敛实验可开启 |
+| 参数 | 快速训练 | 高质量训练 | 说明 |
+|------|----------|------------|------|
+| `--mcts_mode` | **batch** | optimized | batch 模式批量推理，速度快 3-4x |
+| `--num_simulations` | 50 | 200 | MCTS 搜索深度，越高棋力越强 |
+| `--max_moves` | 100 | 200 | 每局最大步数，100 对大多数对局足够 |
+| `--batch_size` | 64 | 256 | 训练批大小，影响梯度稳定性 |
+| `--use_fp16` | ✅ | ✅ | FP16 混合精度，加速 + 省显存 |
+| `--use_grpo` | ✅ | ✅ | GRPO 训练，比传统方法更稳定 |
+| `--num_workers` | 4 | 4 | 并行自对弈进程数 |
+
+**实测速度对比**：
+
+| 模式 | 每局耗时 | 5000局预估 | 棋力 |
+|------|----------|------------|------|
+| batch + 50 sims + 100 moves | ~2-5s | ~3 小时 | 入门 |
+| batch + 100 sims + 100 moves | ~5-10s | ~7 小时 | 中等 |
+| optimized + 200 sims + 200 moves | ~15-20s | ~20 小时 | 较强 |
+
+**训练后人机对弈**：
+
+```bash
+python -m simple_chess_ai play_cli ^
+    --model_path simple_chess_ai/saved_model/model.pth ^
+    --num_simulations 200 ^
+    --human_color red
+```
 
 ---
 
@@ -718,9 +772,15 @@ python -c "import torch_directml; print(torch_directml.device_name(0))"
 ### Q4: 训练很慢（单局超过 1 分钟）
 
 **A**:
-1. 确认 GPU 被正确识别
-2. NVIDIA 用户尝试 `--use_fp16 --mcts_mode batch`
-3. 降低 `--num_simulations`
+1. 确认 GPU 被正确识别（`python -c "import torch; print(torch.cuda.is_available())"`）
+2. **RTX 5070 Ti 用户**：必须使用 PyTorch >= 2.11 + CUDA 13.0，否则 GPU 不兼容
+3. 使用 `--mcts_mode batch` 代替 `optimized`（快 3-4 倍）
+4. 降低 `--num_simulations`（50 足够起步）和 `--max_moves`（100 即可）
+5. NVIDIA 用户确保开启 `--use_fp16 --use_grpo`
+6. 推荐快速训练命令：
+```bash
+python -m simple_chess_ai.train --mcts_mode batch --num_simulations 50 --max_moves 100 --use_grpo --use_fp16 --num_workers 4
+```
 
 ### Q5: CUDA out of memory
 
@@ -729,14 +789,28 @@ python -c "import torch_directml; print(torch_directml.device_name(0))"
 python -m simple_chess_ai train --batch_size 256  # 或 128
 ```
 
-### Q6: FP16 报错或警告
+### Q6: FP16 训练出现 NaN loss
 
-**A**:
-- NVIDIA GPU：确保 CUDA 版本 ≥ 11.0
-- AMD GPU：不支持 FP16，请移除 `--use_fp16`
+**A**: 已修复。代码包含以下保护机制：
+- FP16 安全的 logit 裁剪（-1e4 代替 -1e9，避免溢出）
+- Advantage 值裁剪到 [-2.0, 2.0]
+- 梯度裁剪（max_norm=1.0）+ GradScaler（init_scale=1024）
+- 权重快照恢复机制（检测到 NaN 自动回滚）
+- 确保使用最新代码即可
+
+### Q7: RTX 5070 Ti 报 "sm_120 is not compatible"
+
+**A**: RTX 5070 Ti 是 Blackwell 架构，需要 PyTorch >= 2.11 + CUDA 13.0：
+```bash
+pip install torch==2.11.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+```
+
+### Q8: Windows 下 UnicodeEncodeError
+
+**A**: 已修复。代码中不再使用 ✓/✗ 等 GBK 不兼容字符。
 
 ---
 
-*使用手册版本：v3.0*
-*更新时间：2026-03-22*
-*测试环境：WSL2 + AMD Radeon Pro 5300M / Windows + NVIDIA RTX 5070Ti*
+*使用手册版本：v4.0*
+*更新时间：2026-04-07*
+*测试环境：Windows 11 + NVIDIA RTX 5070Ti (PyTorch 2.11.0+cu130) / WSL2 + AMD Radeon Pro 5300M*
